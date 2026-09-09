@@ -156,8 +156,8 @@ if [[ "${MODE}" != "host" ]]; then
   }
 
   github_latest() {
-    curl -fsSL --retry 3 "https://api.github.com/repos/${APP_REPO}/releases/latest" \
-      | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/'
+    curl -fsSL --retry 3 "https://api.github.com/repos/${APP_REPO}/releases/latest" 2>/dev/null \
+      | grep -m1 '"tag_name"' || true | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' || true
   }
 
   psql_root() {  # run psql as postgres system user
@@ -241,7 +241,7 @@ if [[ "${MODE}" != "host" ]]; then
 
     # --- Go (build dependency, removed again at the end) ------------------------
     if [[ ! -x /usr/local/go/bin/go ]]; then
-      GO_VERSION="$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -n1)"
+      GO_VERSION="$(curl -fsSL --retry 3 'https://go.dev/VERSION?m=text' 2>/dev/null | head -n1 || true)"
       msg_info "Installing Go ${GO_VERSION} ..."
       dl "https://go.dev/dl/${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" /tmp/go.tgz
       tar -C /usr/local -xzf /tmp/go.tgz && rm -f /tmp/go.tgz
@@ -426,9 +426,9 @@ next_free_id() {
   echo "${id}"
 }
 
-ct_hostname() { pct list 2>/dev/null | awk -v i="$1" '$1==i {print $4; exit}'; }
+ct_hostname() { pct list 2>/dev/null | awk -v i="$1" '$1==i {print $4; exit}' || true; }
 
-EXISTING_CT="$(pct list 2>/dev/null | awk -v n="${CT_NAME}" '$4==n {print $1; exit}')"
+EXISTING_CT="$(pct list 2>/dev/null | awk -v n="${CT_NAME}" '$4==n {print $1; exit}' || true)"
 if [[ -n "${EXISTING_CT}" ]]; then
   CT_ID="${EXISTING_CT}"
   msg_info "CT '${CT_NAME}' already exists (ID ${CT_ID}) — reusing it (idempotent)"
@@ -450,7 +450,7 @@ if [[ -z "${CT_TEMPLATE}" ]]; then
   if [[ -z "${avail}" ]]; then
     msg_info "Downloading Debian ${CT_VERSION} LXC template (pveam) ..."
     STD pveam update
-    template_name="$(pveam available --section system 2>/dev/null | awk '{print $2}' | grep -E "debian-${CT_VERSION}-standard" | head -n1)"
+    template_name="$(pveam available --section system 2>/dev/null | awk '{print $2}' | grep -E "debian-${CT_VERSION}-standard" | head -n1 || true)"
     [[ -n "${template_name}" ]] || { msg_error "No Debian ${CT_VERSION} template found via pveam available"; exit 1; }
     STD pveam download local "${template_name}"
     avail="local:vztmpl/${template_name}"
@@ -460,29 +460,33 @@ fi
 msg_info "Template: ${CT_TEMPLATE}"
 
 # --- storage: first ACTIVE storage on this node that supports containers (rootdir)
-# pvesh /storage lists cluster-wide entries; /nodes/<self>/storage filters local +
-# active ones. Never fall back to a storage without rootdir (e.g. backup-only),
-# or pct create fails with "does not support container directories".
+# One single pvesh call — the /nodes/<self>/storage listing already contains the
+# "content" field per storage, so no per-storage queries (which can return empty
+# and die under pipefail). Backup-only storages (no rootdir) are skipped, or
+# pct create fails with "does not support container directories".
 if [[ -z "${CT_STORAGE}" ]]; then
   NODE_NAME="$(hostname)"
   CT_STORAGE=""
-  # candidates: only storages that are active on this node (pvesh filters that)
-  CANDIDATES="$(pvesh get "/nodes/${NODE_NAME}/storage" --output-format json 2>/dev/null \
-    | tr ',' '\n' | awk -v FS='"' '/"storage"/ {print $4}')"
-  while IFS= read -r s; do
+  STORAGE_JSON="$(pvesh get "/nodes/${NODE_NAME}/storage" --output-format json 2>/dev/null || true)"
+  # iterate storage objects: { "storage": "name", ..., "content": "rootdir,images", ... }
+  while IFS='|' read -r s content; do
     [[ -z "${s}" ]] && continue
-    CONTENT="$(pvesh get "/nodes/${NODE_NAME}/storage/${s}" --output-format json 2>/dev/null | grep -oE '"content"\s*:\s*"[^"]*"' | head -1 | grep -oE '[^"]*"$' | tr -d '"')"
-    if [[ "${CONTENT}" == *rootdir* ]]; then
+    if [[ "${content}" == *rootdir* ]]; then
       CT_STORAGE="${s}"
-      msg_info "Storage for LXC rootfs: ${CT_STORAGE} (content: ${CONTENT})"
+      msg_info "Storage for LXC rootfs: ${CT_STORAGE} (content: ${content:-unknown})"
       break
     fi
-  done <<< "${CANDIDATES}"
+  done < <(printf '%s' "${STORAGE_JSON}" \
+    | grep -oE '"storage"\s*:\s*"[^"]*"|"content"\s*:\s*"[^"]*"' \
+    | sed -E 's/"(storage|content)"\s*:\s*"([^"]*)"/\1 \2/' \
+    | awk '/^storage / {s=$2} /^content / {print s "|" $2}')
   if [[ -z "${CT_STORAGE}" ]]; then
     msg_error "No storage with container support (rootdir) found on node ${NODE_NAME}."
     msg_error "Set one explicitly, e.g.: CT_STORAGE=local-lvm bash -c \"\$(wget -qLO - ${SCRIPT_URL_RAW})\""
-    msg_error "Available storages:"
-    pvesh get "/nodes/${NODE_NAME}/storage" 2>/dev/null >&2 || true
+    msg_error "Available storages (name: content):"
+    printf '%s' "${STORAGE_JSON}" | grep -oE '"storage"\s*:\s*"[^"]*"|"content"\s*:\s*"[^"]*"' \
+      | sed -E 's/"(storage|content)"\s*:\s*"([^"]*)"/\1 \2/' \
+      | awk '/^storage / {s=$2} /^content / {print "  " s ": " $2}' >&2 || true
     exit 1
   fi
 fi
@@ -522,7 +526,7 @@ fi
 msg_info "Waiting for network (DHCP) ..."
 CT_IP=""
 for _ in $(seq 1 30); do
-  CT_IP="$(pct exec "${CT_ID}" -- hostname -I 2>/dev/null | awk '{print $1}')"
+  CT_IP="$(pct exec "${CT_ID}" -- hostname -I 2>/dev/null | awk '{print $1}' || true)"
   [[ -n "${CT_IP}" ]] && break
   sleep 2
 done
@@ -544,12 +548,14 @@ msg_ok "In-container installation finished"
 
 # --- verification from the HOST --------------------------------------------------------------
 msg_info "Host-side verification (service + HTTP) ..."
-ACTIVE="$(pct exec "${CT_ID}" -- systemctl is-active "${APP_LOWER}" 2>/dev/null || echo unknown)"
+ACTIVE="$(pct exec "${CT_ID}" -- systemctl is-active "${APP_LOWER}" 2>/dev/null | head -1 || echo unknown)"
+[[ -z "${ACTIVE}" ]] && ACTIVE="unknown"
 HTTP_CODE=""
 for _ in $(seq 1 24); do
   HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://${CT_IP}:${APP_PORT}/healthz" || echo 000)"
   [[ "${HTTP_CODE}" == "200" && "${ACTIVE}" == "active" ]] && break
-  ACTIVE="$(pct exec "${CT_ID}" -- systemctl is-active "${APP_LOWER}" 2>/dev/null || echo unknown)"
+  ACTIVE="$(pct exec "${CT_ID}" -- systemctl is-active "${APP_LOWER}" 2>/dev/null | head -1 || echo unknown)"
+  [[ -z "${ACTIVE}" ]] && ACTIVE="unknown"
   sleep 5
 done
 if [[ "${HTTP_CODE}" != "200" || "${ACTIVE}" != "active" ]]; then
