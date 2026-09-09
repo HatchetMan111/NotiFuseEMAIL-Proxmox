@@ -73,6 +73,11 @@ Nach der Installation den Wizard mit diesen Werten ausfüllen (Beispiel: web.de-
 | `From Email` / `From Name` | Absender der System-Mails — **muss zum Postfach passen**, sonst Spam-Ordner | `bildung4.0@web.de` / `Bildung 4.0` |
 | `EHLO Hostname` | Nur anfassen, wenn der SMTP-Server `EHLO localhost` ablehnt — sonst **leer lassen** (Default = SMTP-Host) | leer |
 
+> **„Invalid URL format" beim API Endpoint?** Die Prüfung ist strikt: exakte Eingabe
+> `http://192.168.178.149:8080` — **ohne** Leerzeichen davor/dahinter (passiert leicht
+> beim Copy-Paste) und **mit** `http://`-Präfix. Private IPs wie `192.168.x.x` sind
+> ausdrücklich erlaubt, nur Leerzeichen oder fehlendes Schema werden abgelehnt.
+
 **Ablauf danach:** Wizard abschließen → Login-Seite → E-Mail eingeben → Magic-Code aus dem Postfach (ggf. Spam-Ordner) eingeben → drin. Kommt keine Mail: `pct exec <ctid> -- journalctl -u notifuse -f` zeigt den SMTP-Fehler (falsches Passwort, Port geblockt etc.).
 
 **Hinweis für echte Newsletter:** web.de & Co. haben Tageslimits und sind nur zum Testen geeignet. Für Volumen: eigene Domain + SPF/DKIM/DMARC und ein Versandanbieter (Amazon SES, Brevo, Postmark …) — wird später pro Workspace eingebunden, im Wizard reicht das eigene Postfach.
