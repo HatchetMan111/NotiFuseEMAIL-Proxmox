@@ -101,7 +101,11 @@ on_error() {
     journalctl -u postgresql -n 20 --no-pager >&2 || true
   fi
   msg_error "Full install log : ${LOG_FILE}"
-  msg_error "Trace re-run      : bash -x $(basename "$0")"
+  if [[ -f "${0}" ]]; then
+    msg_error "Trace re-run      : bash -x ${0}"
+  else
+    msg_error "Trace re-run      : bash -x <(wget -qO- ${SCRIPT_URL_RAW})"
+  fi
   msg_error "══════════════════════════════════════════════════════════════"
   exit "$exit_code"
 }
@@ -455,13 +459,33 @@ if [[ -z "${CT_TEMPLATE}" ]]; then
 fi
 msg_info "Template: ${CT_TEMPLATE}"
 
-# --- storage (JSON-capable via pvesh, no jq required) --------------------------------
+# --- storage: first ACTIVE storage on this node that supports containers (rootdir)
+# pvesh /storage lists cluster-wide entries; /nodes/<self>/storage filters local +
+# active ones. Never fall back to a storage without rootdir (e.g. backup-only),
+# or pct create fails with "does not support container directories".
 if [[ -z "${CT_STORAGE}" ]]; then
-  CT_STORAGE="$(pvesh get /storage --output-format json 2>/dev/null \
-    | grep -oE '"storage"\s*:\s*"[^"]+"' | grep -oE '"[^"]+"$' | tr -d '"' | head -n1 || true)"
-  [[ -n "${CT_STORAGE}" ]] || CT_STORAGE="local-lvm"
+  NODE_NAME="$(hostname)"
+  CT_STORAGE=""
+  # candidates: only storages that are active on this node (pvesh filters that)
+  CANDIDATES="$(pvesh get "/nodes/${NODE_NAME}/storage" --output-format json 2>/dev/null \
+    | tr ',' '\n' | awk -v FS='"' '/"storage"/ {print $4}')"
+  while IFS= read -r s; do
+    [[ -z "${s}" ]] && continue
+    CONTENT="$(pvesh get "/nodes/${NODE_NAME}/storage/${s}" --output-format json 2>/dev/null | grep -oE '"content"\s*:\s*"[^"]*"' | head -1 | grep -oE '[^"]*"$' | tr -d '"')"
+    if [[ "${CONTENT}" == *rootdir* ]]; then
+      CT_STORAGE="${s}"
+      msg_info "Storage for LXC rootfs: ${CT_STORAGE} (content: ${CONTENT})"
+      break
+    fi
+  done <<< "${CANDIDATES}"
+  if [[ -z "${CT_STORAGE}" ]]; then
+    msg_error "No storage with container support (rootdir) found on node ${NODE_NAME}."
+    msg_error "Set one explicitly, e.g.: CT_STORAGE=local-lvm bash -c \"\$(wget -qLO - ${SCRIPT_URL_RAW})\""
+    msg_error "Available storages:"
+    pvesh get "/nodes/${NODE_NAME}/storage" 2>/dev/null >&2 || true
+    exit 1
+  fi
 fi
-msg_info "Storage: ${CT_STORAGE}"
 
 # --- get this script as a file (one-liner pipes it via stdin — nothing to push) ----
 SELF="/tmp/${APP_LOWER}-install.sh"
