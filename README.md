@@ -20,7 +20,7 @@ bash -c "$(wget -qLO - https://raw.githubusercontent.com/HatchetMan111/NotiFuseE
 
 | Phase | Aktion |
 |---|---|
-| Host | Erstellt unprivileged LXC (Debian 13, DHCP, `onboot=1`, `nesting=1`), Defaults: **2 vCPU, 4 GB RAM + 4 GB Swap, 12 GB Disk, Port 8080** — CT-ID/Storage/Template werden automatisch ermittelt, wiederverwendet den existierenden CT `notifuse` (idempotent) |
+| Host | Erstellt unprivileged LXC (**Hostname `notifuse`** + Description mit Repo-URL, Debian 13, DHCP, `onboot=1`, `nesting=1`), Defaults: **2 vCPU, 4 GB RAM + 4 GB Swap, 12 GB Disk, Port 8080** — CT-ID/Storage/Template werden automatisch ermittelt; belegte IDs überspringt der Installer automatisch (nächste freie), den existierenden CT `notifuse` verwendet er idempotent wieder |
 | Container | PostgreSQL 17 (pgdg), Node 22 + Go (nur für den Build), **Notifuse-Release-Tarball von GitHub** → `npm ci && npm run build` (console, notification_center, web_analytics_sdk) → `go build` → Build-Abhängigkeiten werden wieder entfernt |
 | Konfiguration | Zufälliges `SECRET_KEY` + DB-Passwort (`openssl rand`) → `/opt/notifuse/.env` (0600), DB-Rolle mit `CREATEDB` (Workspace-DBs werden dynamisch angelegt), systemd-Unit **GitHub-first aus diesem Repo** (Heredoc-Fallback) |
 | Verifikation | Im CT: `systemctl is-active` + Listen-Check `0.0.0.0:8080` + HTTP `GET /healthz` → danach **vom Host aus** erneut geprüft |
@@ -69,7 +69,7 @@ CT_ID=305 CT_RAM=8192 CT_DISK=20 APP_PORT=8080 bash -c "$(wget -qLO - https://ra
 
 | Variable | Default | Bedeutung |
 |---|---|---|
-| `CT_ID` | auto | nächste freie CT-ID; existierender CT `notifuse` wird per Hostname wiederverwendet |
+| `CT_ID` | auto | **nie kollidierend:** existierender CT `notifuse` (Hostname) wird wiederverwendet; explizit gesetzte, aber belegte IDs führen automatisch zur nächsten freien ID; ohne Vorgabe wird die nächste freie Cluster-ID verwendet und gegen Belegung abgesichert |
 | `CT_CPU` / `CT_RAM` / `CT_SWAP` / `CT_DISK` | 2 / 4096 / 4096 / 12 | vCPU, MiB RAM, MiB Swap, GiB Disk |
 | `CT_VERSION` | 13 | Debian-Version des Templates |
 | `CT_STORAGE` | auto | Storage mit `rootdir`-Content |

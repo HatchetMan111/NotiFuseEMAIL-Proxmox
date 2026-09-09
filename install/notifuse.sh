@@ -407,20 +407,36 @@ fi
 # =============================================================================
 # MODE: host — create/reuse the LXC, hand over to this same script
 # =============================================================================
-if [[ "${SCRIPT_URL_RAW}" == *"HatchetMan111/NotiFuseEMAIL-Proxmox"* && "${0}" != /* ]]; then
-  msg_error "Placeholder URL detected (HatchetMan111/NotiFuseEMAIL-Proxmox). Set SCRIPT_URL_RAW or fork the repo and adjust line 'SCRIPT_URL_RAW='."
-  exit 1
-fi
 
-# --- resolve CT: by name first, else explicit CT_ID, else next free ------------
+# --- CT ID resolution ---------------------------------------------------------
+# Precedence: 1. existing CT with our hostname (idempotent reuse)
+#             2. CT_ID if given AND free (or ours by name)
+#             3. next free cluster ID — never collide with an occupied ID
+next_free_id() {
+  local id
+  id="$(pvesh get /cluster/nextid 2>/dev/null || echo 100)"
+  # bump until really free (protects against cluster race / stale nextid)
+  while pct status "${id}" &>/dev/null; do
+    id=$((id + 1))
+  done
+  echo "${id}"
+}
+
+ct_hostname() { pct list 2>/dev/null | awk -v i="$1" '$1==i {print $4; exit}'; }
+
 EXISTING_CT="$(pct list 2>/dev/null | awk -v n="${CT_NAME}" '$4==n {print $1; exit}')"
-if [[ -n "${CT_ID}" ]]; then
-  msg_info "Using CT ID ${CT_ID} (explicit)"
-elif [[ -n "${EXISTING_CT}" ]]; then
+if [[ -n "${EXISTING_CT}" ]]; then
   CT_ID="${EXISTING_CT}"
-  msg_info "Reusing existing CT ${CT_ID} (hostname '${CT_NAME}')"
+  msg_info "CT '${CT_NAME}' already exists (ID ${CT_ID}) — reusing it (idempotent)"
+elif [[ -n "${CT_ID}" ]] && pct status "${CT_ID}" &>/dev/null; then
+  # explicitly requested ID is occupied by a DIFFERENT container -> next free
+  msg_error "CT ID ${CT_ID} is already taken by '$(ct_hostname "${CT_ID}")' — using next free ID instead"
+  CT_ID="$(next_free_id)"
+  msg_info "Using CT ID ${CT_ID} (next free)"
+elif [[ -n "${CT_ID}" ]]; then
+  msg_info "Using CT ID ${CT_ID} (explicit, free)"
 else
-  CT_ID="$(pvesh get /cluster/nextid)"
+  CT_ID="$(next_free_id)"
   msg_info "Next free CT ID: ${CT_ID}"
 fi
 
@@ -467,6 +483,7 @@ else
   msg_info "Creating LXC ${CT_ID} (${CT_CPU} vCPU, $((CT_RAM/1024)) GiB RAM, ${CT_DISK} GiB disk, unprivileged=${CT_UNPRIVILEGED}) ..."
   pct create "${CT_ID}" "${CT_TEMPLATE}" \
     --hostname "${CT_NAME}" \
+    --description "Notifuse - self-hosted newsletter & email platform (installed via ${SCRIPT_URL_RAW%%/install/*})" \
     --cores "${CT_CPU}" \
     --memory "${CT_RAM}" \
     --swap "${CT_SWAP}" \
