@@ -18,6 +18,11 @@
 # =============================================================================
 set -Eeuo pipefail
 
+# Debian LXC templates ship without any UTF-8 locale (LANG=en_US.UTF-8 unset) —
+# that spams every perl/psql/node call with "Setting locale failed" warnings.
+# C.UTF-8 is built into glibc, needs no locales package, and silences them.
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
+
 # -----------------------------------------------------------------------------
 # Variables (override while invoking, e.g. CT_ID=305 APP_PORT=8080 bash ...)
 # -----------------------------------------------------------------------------
@@ -156,8 +161,11 @@ if [[ "${MODE}" != "host" ]]; then
   }
 
   github_latest() {
+    # NOTE: single trailing "|| true" only — a mid-pipeline "||" would bind
+    # tighter than intended (cmd || (true | next)) and skip the rest on success.
     curl -fsSL --retry 3 "https://api.github.com/repos/${APP_REPO}/releases/latest" 2>/dev/null \
-      | grep -m1 '"tag_name"' || true | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' || true
+      | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
+      | head -1 || true
   }
 
   psql_root() {  # run psql as postgres system user
