@@ -620,6 +620,7 @@ echo
 echo -e "${GATEWAY}${GN}${APP} installation complete and verified!${CL}"
 echo -e "${GATEWAY}Web UI        : ${BGN}http://${CT_IP}:${APP_PORT}${CL}"
 echo -e "${GATEWAY}Setup wizard  : ${BGN}http://${CT_IP}:${APP_PORT}/setup${CL}"
+echo -e "${GATEWAY}Wizard-Felder : Root-Email=Admin (Login per Magic-Code) | API-Endpoint http://${CT_IP}:${APP_PORT} | SMTP=dein Postfach (z.B. smtp.web.de:587, TLS an, From=deine Adresse) | EHLO leer lassen | Details: README 'Ersteinrichtung'${CL}"
 echo -e "${GATEWAY}Update later  : ${BGN}pct exec ${CT_ID} -- bash /root/${APP_LOWER}.sh --update${CL}"
 echo -e "${GATEWAY}App logs      : ${BGN}pct exec ${CT_ID} -- journalctl -u ${APP_LOWER} -f${CL}"
 echo -e "${GATEWAY}Install log   : ${BGN}pct exec ${CT_ID} -- tail -n 200 /var/log/notifuse-install.log${CL}"

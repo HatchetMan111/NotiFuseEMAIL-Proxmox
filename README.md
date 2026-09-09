@@ -58,6 +58,25 @@ Web UI am Ende: `http://<LXC-IP>:8080` (Setup-Wizard unter `/setup`).
 [http]Install log   : pct exec 301 -- tail -n 200 /var/log/notifuse-install.log
 ```
 
+## Ersteinrichtung (Setup-Wizard unter `/setup`)
+
+Nach der Installation den Wizard mit diesen Werten ausfüllen (Beispiel: web.de-Postfach):
+
+| Feld | Bedeutung | Beispiel |
+|---|---|---|
+| `Root Email` | Admin-Konto. Login erfolgt **passwortlos per Magic-Code**, der an diese Adresse gemailt wird — nimm eine Adresse, die du abrufen kannst | `bildung4.0@web.de` |
+| `API Endpoint` | Öffentliche URL deiner Instanz (Basis für Tracking-Links + API). Im Heimnetz: `http://<LXC-IP>:8080` | `http://192.168.178.50:8080` |
+| `Subscribe to the newsletter` | Optional: News von Notifuse selbst erhalten (standardmäßig aus) | nach Wahl |
+| `SMTP Host` / `SMTP Port` | Versand-Server für **alle** System-Mails (Magic-Codes, Einladungen, Kampagnen) | `smtp.web.de` / `587` |
+| `Use TLS` | STARTTLS-Verschlüsselung — immer an bei Port 587 | an |
+| `SMTP Username` / `SMTP Password` | Login am Postfach (volle Adresse; bei 2FA ggf. App-Passwort aus den web.de-Einstellungen) | `bildung4.0@web.de` / `***` |
+| `From Email` / `From Name` | Absender der System-Mails — **muss zum Postfach passen**, sonst Spam-Ordner | `bildung4.0@web.de` / `Bildung 4.0` |
+| `EHLO Hostname` | Nur anfassen, wenn der SMTP-Server `EHLO localhost` ablehnt — sonst **leer lassen** (Default = SMTP-Host) | leer |
+
+**Ablauf danach:** Wizard abschließen → Login-Seite → E-Mail eingeben → Magic-Code aus dem Postfach (ggf. Spam-Ordner) eingeben → drin. Kommt keine Mail: `pct exec <ctid> -- journalctl -u notifuse -f` zeigt den SMTP-Fehler (falsches Passwort, Port geblockt etc.).
+
+**Hinweis für echte Newsletter:** web.de & Co. haben Tageslimits und sind nur zum Testen geeignet. Für Volumen: eigene Domain + SPF/DKIM/DMARC und ein Versandanbieter (Amazon SES, Brevo, Postmark …) — wird später pro Workspace eingebunden, im Wizard reicht das eigene Postfach.
+
 ## Konfiguration (Variablen)
 
 Alle Variablen stehen am Kopf von `install/notifuse.sh` und können beim Aufruf
