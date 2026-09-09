@@ -72,7 +72,7 @@ CT_ID=305 CT_RAM=8192 CT_DISK=20 APP_PORT=8080 bash -c "$(wget -qLO - https://ra
 | `CT_ID` | auto | **nie kollidierend:** existierender CT `notifuse` (Hostname) wird wiederverwendet; explizit gesetzte, aber belegte IDs führen automatisch zur nächsten freien ID; ohne Vorgabe wird die nächste freie Cluster-ID verwendet und gegen Belegung abgesichert |
 | `CT_CPU` / `CT_RAM` / `CT_SWAP` / `CT_DISK` | 2 / 4096 / 4096 / 12 | vCPU, MiB RAM, MiB Swap, GiB Disk |
 | `CT_VERSION` | 13 | Debian-Version des Templates |
-| `CT_STORAGE` | auto | erster **aktiver** Storage am Node mit `rootdir`-Content (Backup-Storages werden übersprungen); Fallback-Fehler mit Hinweis auf `CT_STORAGE=...`, falls kein container-fähiger Storage existiert |
+| `CT_STORAGE` | auto | Server-seitige Auswahl (`--content rootdir`, identische Prüfung wie `pct create`; Backup-/ungeeignete Storages werden ausgeschlossen). Präferenz: `local-lvm` → `local` → nicht-shared → Rest; zu volle Storages (< Disk + 2 GiB) werden übersprungen, zur Not `CT_STORAGE=...` explizit setzen |
 | `NET_BRIDGE` | vmbr0 | Bridge für `eth0` (DHCP) |
 | `APP_PORT` | 8080 | Web-UI-Port (bind `0.0.0.0`) |
 | `DB_NAME` / `DB_USER` | notifuse_system / notifuse | PostgreSQL-Rolle/DB (Postgres lauscht nur auf localhost) |

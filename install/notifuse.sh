@@ -459,36 +459,56 @@ if [[ -z "${CT_TEMPLATE}" ]]; then
 fi
 msg_info "Template: ${CT_TEMPLATE}"
 
-# --- storage: first ACTIVE storage on this node that supports containers (rootdir)
-# One single pvesh call — the /nodes/<self>/storage listing already contains the
-# "content" field per storage, so no per-storage queries (which can return empty
-# and die under pipefail). Backup-only storages (no rootdir) are skipped, or
-# pct create fails with "does not support container directories".
+# --- storage: server-side verdict identical to the pct create check -----------------
+# `pvesh ... --content rootdir` filters with the SAME parsed content hash that
+# `pct create` validates ($scfg->{content}->{rootdir} in PVE/API2/LXC.pm).
+# Client-side string matching is NOT sufficient: a storage may list rootdir in
+# its content string while the plugin-validated hash lacks it (then pct create
+# fails with "does not support container directories").
+# Preference: local-lvm (battle-tested default) > local > non-shared > anything.
+# Storages without enough free space for CT_DISK (+2 GiB margin) are skipped.
 if [[ -z "${CT_STORAGE}" ]]; then
   NODE_NAME="$(hostname)"
   CT_STORAGE=""
-  STORAGE_JSON="$(pvesh get "/nodes/${NODE_NAME}/storage" --output-format json 2>/dev/null || true)"
-  # iterate storage objects: { "storage": "name", ..., "content": "rootdir,images", ... }
-  while IFS='|' read -r s content; do
-    [[ -z "${s}" ]] && continue
-    if [[ "${content}" == *rootdir* ]]; then
-      CT_STORAGE="${s}"
-      msg_info "Storage for LXC rootfs: ${CT_STORAGE} (content: ${content:-unknown})"
-      break
-    fi
-  done < <(printf '%s' "${STORAGE_JSON}" \
-    | grep -oE '"storage"\s*:\s*"[^"]*"|"content"\s*:\s*"[^"]*"' \
-    | sed -E 's/"(storage|content)"\s*:\s*"([^"]*)"/\1 \2/' \
-    | awk '/^storage / {s=$2} /^content / {print s "|" $2}')
+  NEED_GB=$((CT_DISK + 2))
+  NEED_BYTES=$((NEED_GB * 1024 * 1024 * 1024))
+  STORAGE_JSON="$(pvesh get "/nodes/${NODE_NAME}/storage" --content rootdir --output-format json 2>/dev/null || true)"
+  # name|content|avail|shared per storage object (flat JSON objects, no nesting)
+  CANDIDATES="$(printf '%s' "${STORAGE_JSON}" \
+    | grep -oE '\{[^{}]*\}' \
+    | while IFS= read -r obj; do
+        s="$(printf '%s' "$obj" | grep -oE '"storage"\s*:\s*"[^"]*"' | head -1 | sed -E 's/.*"(.*)"/\1/' || true)"
+        [[ -z "$s" ]] && continue
+        c="$(printf '%s' "$obj" | grep -oE '"content"\s*:\s*"[^"]*"' | head -1 | sed -E 's/.*"(.*)"/\1/' || true)"
+        a="$(printf '%s' "$obj" | grep -oE '"avail"\s*:\s*[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
+        sh="$(printf '%s' "$obj" | grep -oE '"shared"\s*:\s*[01]' | head -1 | grep -oE '[01]$' || true)"
+        printf '%s|%s|%s|%s\n' "$s" "$c" "${a:-0}" "${sh:-0}"
+      done || true)"
+  for tier in local-lvm local NONSHARED ANY; do
+    while IFS='|' read -r s c a sh; do
+      [[ -z "$s" ]] && continue
+      [[ "$c" == *rootdir* ]] || continue
+      case "$tier" in
+        local-lvm|local) [[ "$s" == "$tier" ]] || continue ;;
+        NONSHARED) [[ "$sh" == "1" ]] && continue ;;
+        ANY) : ;;
+      esac
+      if [[ -n "$a" && "$a" != "0" ]] && (( a < NEED_BYTES )); then
+        msg_info "Storage '${s}' skipped: only $((a / 1024 / 1024 / 1024)) GiB free (< ${NEED_GB} GiB needed)"
+        continue
+      fi
+      CT_STORAGE="$s"
+      break 2
+    done <<< "${CANDIDATES}"
+  done
   if [[ -z "${CT_STORAGE}" ]]; then
-    msg_error "No storage with container support (rootdir) found on node ${NODE_NAME}."
+    msg_error "No usable container storage (rootdir + ${NEED_GB} GiB free) found on node ${NODE_NAME}."
     msg_error "Set one explicitly, e.g.: CT_STORAGE=local-lvm bash -c \"\$(wget -qLO - ${SCRIPT_URL_RAW})\""
-    msg_error "Available storages (name: content):"
-    printf '%s' "${STORAGE_JSON}" | grep -oE '"storage"\s*:\s*"[^"]*"|"content"\s*:\s*"[^"]*"' \
-      | sed -E 's/"(storage|content)"\s*:\s*"([^"]*)"/\1 \2/' \
-      | awk '/^storage / {s=$2} /^content / {print "  " s ": " $2}' >&2 || true
+    msg_error "Server-side rootdir candidates were:"
+    printf '%s\n' "${CANDIDATES}" | sed 's/^/  /' >&2 || true
     exit 1
   fi
+  msg_info "Storage for LXC rootfs: ${CT_STORAGE}"
 fi
 
 # --- get this script as a file (one-liner pipes it via stdin — nothing to push) ----
