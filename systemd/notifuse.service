@@ -1,0 +1,23 @@
+[Unit]
+Description=Notifuse - self-hosted newsletter & email platform
+Documentation=https://github.com/Notifuse/notifuse
+Wants=network-online.target
+After=network-online.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=notifuse
+Group=notifuse
+WorkingDirectory=/opt/notifuse
+EnvironmentFile=/opt/notifuse/.env
+ExecStart=/opt/notifuse/notifuse-server
+Restart=always
+RestartSec=5
+# hardening (unprivileged LXC friendly)
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/opt/notifuse/data
+
+[Install]
+WantedBy=multi-user.target
